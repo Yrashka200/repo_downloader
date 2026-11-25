@@ -1,20 +1,21 @@
 """Entry point: menu + orchestration."""
 
+import argparse
 import shutil
 import sys
 
 from core.downloader import download_all
 from core.fallback import ask_fallback
+from core.updater import check_for_updates, prompt_restart_if_needed
 from providers import PROVIDERS
 
 
 def logo():
     print(r"""
-    ____  _____ ____  ____    ____  _        _______  _______  _______  ______   ______
-   |  _ \| ____|  _ \/ __ \  |  _ \| |      / /  _  \|  _  \|  _  \|  _  \ /  __  \
-   | |_) |  _| | |_) | |  | | | | | | |     / /| | | || |_) || |_) || |_) | |  |  |
-   |  _ <| |___|  __/| |__| | | |_| | |___ / / | |_| ||  _ < |  _ < |  _ < |  |__| |
-   |_| \_\_____|_|    \____/  |____/|_____/_/  \_____/|_| \_\|_| \_\|_| \_\ \______/
+  ==========================================
+   REPO DOWNLOADER
+   GitHub / GitLab / Forgejo
+  ==========================================
 """)
 
 
@@ -34,7 +35,39 @@ def choose_provider():
         print("Invalid choice, try again.")
 
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Download all available repositories of a user."
+    )
+    parser.add_argument(
+        "--check-updates",
+        action="store_true",
+        help="Check for updates and exit (no downloads).",
+    )
+    parser.add_argument(
+        "--no-update-check",
+        action="store_true",
+        help="Skip the automatic update check at startup.",
+    )
+    return parser.parse_args()
+
+
 def main() -> None:
+    args = parse_args()
+
+    if args.check_updates:
+        check_for_updates(silent_if_none=False)
+        sys.exit(0)
+
+    if not args.no_update_check:
+        try:
+            updated = check_for_updates(silent_if_none=True)
+        except Exception as e:
+            print(f"Update check failed: {e}")
+            updated = False
+        if updated:
+            prompt_restart_if_needed(updated)
+
     if shutil.which("git") is None:
         print("'git' is not installed or not in PATH.")
         sys.exit(1)
