@@ -10,6 +10,8 @@ class Repo:
     clone_url: str
     private: bool = False
     default_branch: str = "main"
+    fork: bool = False
+    archived: bool = False
 
 
 class Provider(ABC):
@@ -18,11 +20,16 @@ class Provider(ABC):
     name: str = "base"
 
     @abstractmethod
-    def fetch_repos(self, username: str) -> list[Repo] | None:
+    def fetch_repos(
+        self,
+        username: str,
+        skip_forks: bool = False,
+        skip_archived: bool = False,
+    ) -> list[Repo] | None:
         """
         Return a list of repositories.
         None -> account unavailable (suspended / not found / banned).
-        []   -> account exists but has no repos.
+        []   -> account exists but no repos match the filters.
         """
 
     @abstractmethod

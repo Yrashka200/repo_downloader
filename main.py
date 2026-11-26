@@ -4,6 +4,7 @@ import argparse
 import shutil
 import sys
 
+from config import SKIP_ARCHIVED_DEFAULT, SKIP_FORKS_DEFAULT
 from core.downloader import download_all
 from core.fallback import ask_fallback
 from core.updater import check_for_updates, prompt_restart_if_needed
@@ -37,7 +38,7 @@ def choose_provider():
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Download all available repositories of a user."
+        description="Download and update all available repositories of a user."
     )
     parser.add_argument(
         "--check-updates",
@@ -48,6 +49,18 @@ def parse_args() -> argparse.Namespace:
         "--no-update-check",
         action="store_true",
         help="Skip the automatic update check at startup.",
+    )
+    parser.add_argument(
+        "--skip-forks",
+        action="store_true",
+        default=SKIP_FORKS_DEFAULT,
+        help="Do not download forks.",
+    )
+    parser.add_argument(
+        "--skip-archived",
+        action="store_true",
+        default=SKIP_ARCHIVED_DEFAULT,
+        help="Do not download archived repositories.",
     )
     return parser.parse_args()
 
@@ -82,7 +95,11 @@ def main() -> None:
         sys.exit(1)
 
     print(f"\nFetching repos for '{username}' on {provider.name}...")
-    repos = provider.fetch_repos(username)
+    repos = provider.fetch_repos(
+        username,
+        skip_forks=args.skip_forks,
+        skip_archived=args.skip_archived,
+    )
 
     if repos is None:
         repos = ask_fallback(provider, username)
@@ -90,7 +107,7 @@ def main() -> None:
             print("Cancelled.")
             sys.exit(0)
     elif not repos:
-        print(f"No public repositories found for '{username}'.")
+        print(f"No repositories match the filters for '{username}'.")
         sys.exit(0)
 
     print(f"Found {len(repos)} repositories.\n")

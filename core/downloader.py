@@ -1,4 +1,4 @@
-"""Download orchestration: cloning, progress, stats."""
+"""Download orchestration: cloning / fetching, progress, stats."""
 
 import os
 import subprocess
@@ -9,18 +9,10 @@ from core.progress import ProgressTracker, format_time
 from providers.base import Provider, Repo
 
 
-def clone_repo(url: str, dest: str, timeout: int = CLONE_TIMEOUT) -> tuple[bool, str]:
-    if os.path.exists(dest):
-        return True, "already exists, skipped"
-
-    cmd = ["git", "clone"]
-    if CLONE_DEPTH:
-        cmd += ["--depth", str(CLONE_DEPTH)]
-    cmd += [url, dest]
-
+def _run_git(args: list[str], timeout: int = CLONE_TIMEOUT) -> tuple[bool, str]:
     try:
         result = subprocess.run(
-            cmd,
+            args,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
             timeout=timeout,
@@ -33,6 +25,51 @@ def clone_repo(url: str, dest: str, timeout: int = CLONE_TIMEOUT) -> tuple[bool,
         return False, f"timeout after {timeout}s"
     except Exception as e:
         return False, str(e)
+
+
+def _is_git_repo(path: str) -> bool:
+    return os.path.isdir(os.path.join(path, ".git"))
+
+
+def sync_repo(url: str, dest: str, timeout: int = CLONE_TIMEOUT) -> tuple[bool, str]:
+    """
+    Clone if missing, otherwise update an existing checkout via fetch + ff-only merge.
+    Returns (ok, message).
+    """
+    if not os.path.exists(dest):
+        cmd = ["git", "clone"]
+        if CLONE_DEPTH:
+            cmd += ["--depth", str(CLONE_DEPTH)]
+        cmd += [url, dest]
+        ok, msg = _run_git(cmd, timeout)
+        return ok, (msg or "cloned")
+
+    if not _is_git_repo(dest):
+        return False, "path exists but is not a git repository; skipped"
+
+    # Existing repo: fetch and fast-forward if possible
+    ok, msg = _run_git(["git", "-C", dest, "fetch", "--prune", "origin"], timeout)
+    if not ok:
+        return False, f"fetch failed: {msg}"
+
+    # Determine current branch
+    ok, out = _run_git(["git", "-C", dest, "rev-parse", "--abbrev-ref", "HEAD"], timeout)
+    if not ok:
+        return False, f"cannot detect branch: {out}"
+    branch = out.strip() or "HEAD"
+
+    if branch == "HEAD":
+        # Detached HEAD; nothing safe to fast-forward
+        return True, "fetched (detached HEAD, not merged)"
+
+    ok, msg = _run_git(
+        ["git", "-C", dest, "merge", "--ff-only", f"origin/{branch}"],
+        timeout,
+    )
+    if not ok:
+        return False, f"not fast-forwardable: {msg}"
+
+    return True, "fetched and fast-forwarded"
 
 
 def download_all(
@@ -50,14 +87,17 @@ def download_all(
     failed: list[tuple[str, str]] = []
 
     for i, repo in enumerate(repos, 1):
-        print(f"[{i}/{len(repos)}] Cloning '{repo.name}'...")
+        existed = os.path.exists(os.path.join(root, repo.name))
+        action = "Updating" if existed else "Cloning"
+        print(f"[{i}/{len(repos)}] {action} '{repo.name}'...")
+
         t0 = time.time()
-        ok, msg = clone_repo(repo.clone_url, os.path.join(root, repo.name))
+        ok, msg = sync_repo(repo.clone_url, os.path.join(root, repo.name))
         elapsed = time.time() - t0
 
         if ok:
             success.append(repo.name)
-            print(f"   OK ({format_time(elapsed)}, {msg or 'cloned'})")
+            print(f"   OK ({format_time(elapsed)}, {msg})")
         else:
             failed.append((repo.name, msg))
             print(f"   FAILED: {msg}")
